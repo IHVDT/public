@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Flappy Bird – HTML/Canvas (zonder assets)</title>
+<style>
+  :root{
+    --bg:#0b1020; --panel:#0f1634; --ink:#e6ebff; --muted:#9fb2ff; --accent:#7cf;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; display:grid; place-items:center; background:radial-gradient(1200px 600px at 50% -10%, #1a234a, var(--bg));
+    color:var(--ink); font-family:ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial;
+  }
+  .wrap{width:min(92vw,900px)}
+  h1{margin:0 0 10px}
+  .hud{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:8px 0}
+  .btns{display:flex;gap:8px}
+  button{background:#172045;color:var(--ink);border:1px solid #2f3a75;padding:8px 12px;border-radius:10px;cursor:pointer;font:inherit}
+  button:hover{border-color:var(--accent)}
+  .panel{border:1px solid #2b356a;border-radius:12px;background:var(--panel);padding:10px}
+  canvas{display:block;width:100%;height:auto;border-radius:10px;background:linear-gradient(#87CEEB,#bfe8ff)}
+  .note{color:var(--muted);font-size:.95rem;margin-top:8px;text-align:center}
+  .kbd{padding:0 6px;border:1px solid #445;border-radius:6px;background:#0b112a}
+  .bar{height:6px;border-radius:999px;background:#091030;border:1px solid #263060;overflow:hidden}
+  .bar>i{display:block;height:100%;width:0;background:linear-gradient(90deg,#4af,#7cf)}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="hud">
+      <h1>Flappy Bird 🐤</h1>
+      <div class="btns">
+        <button id="startBtn">Start</button>
+        <button id="pauseBtn">Pauze</button>
+        <button id="resetBtn">Reset</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <canvas id="game" width="400" height="600" aria-label="Flappy Bird"></canvas>
+    </div>
+
+    <div class="hud">
+      <div>Score: <b id="score">0</b> • Best: <b id="best">0</b> • Level: <b id="level">1</b></div>
+      <div style="min-width:180px" class="bar"><i id="speedBar"></i></div>
+    </div>
+
+    <p class="note">Besturing: klik/tap of <span class="kbd">Spatie</span>/<span class="kbd">↑</span> om te flappen · <span class="kbd">P</span> pauze · <span class="kbd">R</span> reset.</p>
+  </div>
+
+<script>
+// ====== Flappy Bird zonder assets ======
+(function(){
+  const cvs = document.getElementById('game');
+  const ctx = cvs.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const bestEl = document.getElementById('best');
+  const levelEl = document.getElementById('level');
+  const speedBar = document.getElementById('speedBar');
+
+  // World constants
+  const W = cvs.width, H = cvs.height;
+  const G = 1800;                 // zwaartekracht px/s^2
+  const FLAP = -450;              // flap impuls (snelheid)
+  const PIPE_GAP_MIN = 110, PIPE_GAP_MAX = 170;
+  const PIPE_W = 70;
+  const PIPE_DIST = 210;          // afstand in x tussen pijpensets
+  const FLOOR_H = 100;
+  const BIRD_R = 14;              // straal
+
+  // Difficulty
+  const TICK_START = 1/60;        // vaste timestep
+  let scrollSpeed = 140;          // px/s (verhoogt per level)
+  let level = 1;
+
+  // State
+  let bird, pipes, score=0, best=0, running=false, paused=false, acc=0, last=0, sincePipe=0, gameOver=false;
+
+  // Audio (beeps via WebAudio)
+  let acx=null;
+  function audioInit(){
+    if (!acx) {
+      acx = new (window.AudioContext||window.webkitAudioContext)();
+    }
+  }
+  function beep(type='sine', freq=600, dur=0.08, vol=0.05){
+    if (!acx) return;
+    const o = acx.createOscillator();
+    const g = acx.createGain();
+    o.type = type; o.frequency.value=freq;
+    g.gain.value = vol;
+    o.connect(g).connect(acx.destination);
+    o.start();
+    o.stop(acx.currentTime+dur);
+  }
+  const sfx = {
+    flap(){ beep('square', 900, 0.06, 0.06); },
+    point(){ beep('triangle', 700, 0.09, 0.06); },
+    hit(){ beep('sawtooth', 120, 0.18, 0.08); }
+  };
+
+  // Storage
+  best = Number(localStorage.getItem('flappyBest')||0);
+  bestEl.textContent = best;
+
+  function reset(){
+    bird = {x: W*0.28, y: H*0.45, vy: 0, r: BIRD_R};
+    pipes = []; score = 0; level = 1; scrollSpeed = 140; sincePipe = 0; gameOver=false; acc=0; last=0;
+    updateHUD();
+    draw(true);
+  }
+
+  function updateHUD(){
+    scoreEl.textContent = score;
+    bestEl.textContent = best;
+    levelEl.textContent = level;
+    const pct = Math.min(1, (scrollSpeed-140)/200);
+    speedBar.style.width = Math.round(pct*100)+'%';
+  }
+
+  function spawnPipe(){
+    const gap = PIPE_GAP_MAX - Math.min(60, (level-1)*8); // verklein met level
+    const gapSize = Math.max(PIPE_GAP_MIN, gap);
+    const margin = 40; // top/bottom veiligheidsmarge
+    const top = Math.floor(Math.random()*(H - FLOOR_H - margin*2 - gapSize)) + margin;
+    const x = W + 20;
+    pipes.push({x, w: PIPE_W, top, gap: gapSize, passed:false});
+  }
+
+  function flap(){ if (gameOver) return; bird.vy = FLAP; sfx.flap(); }
+
+  function update(dt){
+    if (paused || gameOver) return;
+
+    // bird physics
+    bird.vy += G*dt;
+    bird.y += bird.vy*dt;
+
+    // pipes
+    sincePipe += scrollSpeed*dt;
+    if (sincePipe >= PIPE_DIST){ spawnPipe(); sincePipe = 0; }
+    for (const p of pipes){ p.x -= scrollSpeed*dt; }
+    while (pipes.length && pipes[0].x + pipes[0].w < -10) pipes.shift();
+
+    // collisions & scoring
+    for (const p of pipes){
+      // scoren als midden bird voorbij midden pijp
+      if (!p.passed && bird.x > p.x + p.w){ p.passed = true; score++; sfx.point(); if (score % 8 === 0){ level++; scrollSpeed = Math.min(340, scrollSpeed + 22); } }
+
+      // collision rects
+      const inX = bird.x + bird.r > p.x && bird.x - bird.r < p.x + p.w;
+      if (inX){
+        const gapTop = p.top;
+        const gapBot = p.top + p.gap;
+        if (bird.y - bird.r < gapTop || bird.y + bird.r > gapBot){
+          return die();
+        }
+      }
+    }
+
+    // ground / ceiling
+    if (bird.y + bird.r >= H - FLOOR_H || bird.y - bird.r <= 0){ return die(); }
+  }
+
+  function die(){
+    sfx.hit();
+    gameOver = true; running = false;
+    best = Math.max(best, score);
+    localStorage.setItem('flappyBest', String(best));
+    updateHUD();
+    draw();
+    overlayText("GAME OVER", `Score: ${score} — Best: ${best}\nDruk R voor reset of Start om opnieuw.`);
+  }
+
+  function draw(initial=false){
+    // achtergrond (lucht)
+    ctx.clearRect(0,0,W,H);
+
+    // parallax wolkjes
+    ctx.save();
+    ctx.globalAlpha = 0.15;
+    ctx.fillStyle = '#ffffff';
+    for (let i=0;i<6;i++){
+      const x = (i*80 + (performance.now()*0.02)%W) % W;
+      const y = 60 + (i*37)%220;
+      ctx.beginPath(); ctx.arc(x, y, 22, 0, Math.PI*2); ctx.arc(x+24,y+4,18,0,Math.PI*2); ctx.arc(x-18,y+6,16,0,Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+
+    // pipes
+    for (const p of pipes){
+      const topH = p.top;
+      const botY = p.top + p.gap;
+      const botH = H - FLOOR_H - botY;
+      // pijp stijl
+      ctx.fillStyle = '#2ecc71';
+      ctx.fillRect(p.x, 0, p.w, topH);
+      ctx.fillRect(p.x-6, topH-26, p.w+12, 26); // rand
+      ctx.fillRect(p.x, botY, p.w, botH);
+      ctx.fillRect(p.x-6, botY, p.w+12, 26);
+      ctx.fillStyle = '#27ae60';
+      ctx.fillRect(p.x+4, 0, 8, topH);
+      ctx.fillRect(p.x+4, botY, 8, botH);
+    }
+
+    // grond
+    ctx.fillStyle = '#d0a36b';
+    ctx.fillRect(0, H-FLOOR_H, W, FLOOR_H);
+    // bewegende grasrand
+    const t = (performance.now()/12)%W;
+    ctx.fillStyle = '#7fbf4d';
+    for (let x=-t; x<W; x+=28){ ctx.fillRect(x, H-FLOOR_H, 22, 10); }
+
+    // bird (simpel: cirkel + vleugeltje)
+    ctx.save();
+    ctx.translate(bird.x, bird.y);
+    ctx.fillStyle = '#ffd166'; // body
+    ctx.beginPath(); ctx.arc(0,0,bird.r,0,Math.PI*2); ctx.fill();
+    // oog
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(4,-4,4,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#000'; ctx.beginPath(); ctx.arc(5,-4,2,0,Math.PI*2); ctx.fill();
+    // snavel
+    ctx.fillStyle = '#ff7b00'; ctx.beginPath(); ctx.moveTo(bird.r-2,-2); ctx.lineTo(bird.r+8,0); ctx.lineTo(bird.r-2,2); ctx.closePath(); ctx.fill();
+    // vleugel
+    ctx.fillStyle = '#fcbf49';
+    const flapPhase = Math.sin(performance.now()/120);
+    ctx.save(); ctx.rotate(flapPhase*0.3); ctx.beginPath(); ctx.ellipse(-6,6,9,6,0,0,Math.PI*2); ctx.fill(); ctx.restore();
+    ctx.restore();
+
+    // score overlay
+    ctx.fillStyle = 'rgba(0,0,0,0.25)';
+    ctx.fillRect(10,10,80,36);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 22px system-ui, sans-serif';
+    ctx.fillText(String(score), 18, 35);
+
+    if (initial) overlayText('Klaar voor start?', 'Klik/Tap of Spatie om te flappen.');
+  }
+
+  function overlayText(title, subtitle){
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(40, 150, W-80, 160);
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.strokeRect(40,150,W-80,160);
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 36px system-ui, sans-serif';
+    ctx.fillText(title, W/2, 210);
+    ctx.font = '16px system-ui, sans-serif';
+    subtitle.split('\n').forEach((line,i)=>ctx.fillText(line, W/2, 240 + i*22));
+    ctx.restore();
+  }
+
+  function loop(ts){
+    if (!running) return; // stop raf als niet actief
+    const now = ts/1000;
+    if (!last) last = now;
+    let dt = now - last; last = now;
+    // clamp dt om spikes te voorkomen
+    if (dt>0.05) dt=0.05;
+    acc += dt;
+    while (acc >= TICK_START){
+      update(TICK_START);
+      acc -= TICK_START;
+    }
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  function start(){ if (!running && !gameOver){ running = true; paused=false; requestAnimationFrame(loop); } }
+  function pauseToggle(){ if (!running) return; paused = !paused; if (!paused) requestAnimationFrame(loop); }
+
+  // Inputs
+  function onPrimary(){ audioInit(); if (!running && !gameOver){ start(); } flap(); }
+
+  window.addEventListener('keydown', e=>{
+    const k = e.key.toLowerCase();
+    if (k === ' ' || k === 'arrowup') { e.preventDefault(); onPrimary(); }
+    if (k === 'p') { pauseToggle(); }
+    if (k === 'r') { reset(); }
+  });
+  cvs.addEventListener('pointerdown', onPrimary);
+
+  document.getElementById('startBtn').onclick = ()=>{ audioInit(); if (gameOver){ reset(); } start(); };
+  document.getElementById('pauseBtn').onclick = pauseToggle;
+  document.getElementById('resetBtn').onclick = reset;
+
+  // Boot
+  reset();
+})();
+</script>
+</body>
+</html>
