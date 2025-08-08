@@ -1,1 +1,513 @@
-Hello world.
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Installatiehok van de Toekomst</title>
+  <meta name="description" content="Startpagina met tools voor het Installatiehok van de Toekomst" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Ccircle cx='64' cy='64' r='56' fill='%2300e0a4'/%3E%3Cpath d='M38 70l18 18 34-50' stroke='%2300151b' stroke-width='10' stroke-linecap='round' stroke-linejoin='round' fill='none'/%3E%3C/svg%3E" />
+  <style>
+    :root{
+      --bg-1:#0b1b2a;
+      --bg-2:#00151b;
+      --bg-3:#142a38;
+      --neon:#00e0a4;
+      --neon-2:#5ee7ff;
+      --text:#e9f3f7;
+      --muted:#a8c1cc;
+      --card:#0e2231cc;
+      --card-hover:#113142e6;
+      --shadow:0 10px 30px rgba(0,0,0,.35);
+      --radius:16px;
+      --gap:18px;
+      --grid: minmax(240px, 1fr);
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      height: 100%;
+      margin: 0;
+      color: var(--text);
+      font-family: ui-sans-serif, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      background: radial-gradient(1200px 800px at 10% 10%, #082131 20%, transparent 60%) no-repeat,
+                  radial-gradient(1000px 600px at 90% 20%, #062230 20%, transparent 60%) no-repeat,
+                  radial-gradient(1200px 900px at 50% 120%, #0b2233 10%, transparent 60%) no-repeat,
+                  conic-gradient(from 180deg at 50% 50%, var(--bg-1), var(--bg-2), var(--bg-3), var(--bg-1));
+      overflow-x: hidden;
+    }
+
+    /* Subtiele bewegende gradient */
+    body::before{
+      content:"";
+      position:fixed; inset:0;
+      background: conic-gradient(from 0turn at 50% 50%, rgba(0,224,164,.08), rgba(94,231,255,.08), rgba(0,224,164,.08));
+      animation: swirl 22s linear infinite;
+      mix-blend-mode: screen;
+      pointer-events:none;
+    }
+    @keyframes swirl {
+      0% { transform: rotate(0deg) scale(1.05); filter:hue-rotate(0deg) saturate(1.1); }
+      50% { transform: rotate(180deg) scale(1.08); filter:hue-rotate(25deg) saturate(1.3); }
+      100% { transform: rotate(360deg) scale(1.05); filter:hue-rotate(0deg) saturate(1.1); }
+    }
+
+    /* Canvas voor interactieve deeltjes */
+    #fx {
+      position: fixed; inset: 0; z-index: 0; opacity: .45; pointer-events: none; filter: blur(.1px);
+    }
+
+    .wrap {
+      position: relative; z-index: 1;
+      min-height: 100dvh; display: flex; flex-direction: column;
+    }
+
+    header {
+      position: sticky; top: 0; z-index: 2;
+      backdrop-filter: blur(8px);
+      background: linear-gradient(180deg, rgba(2,12,18,.8), rgba(2,12,18,.4));
+      border-bottom: 1px solid rgba(255,255,255,.06);
+    }
+    .inner {
+      width: min(1200px, 92vw);
+      margin: 0 auto;
+      padding: 18px 0 8px;
+    }
+    .title {
+      display:flex; align-items:center; gap: 12px; flex-wrap: wrap;
+    }
+    .logo {
+      width: 42px; height: 42px; border-radius: 12px;
+      background: radial-gradient(120% 120% at 30% 30%, var(--neon), transparent),
+                  radial-gradient(120% 120% at 70% 70%, var(--neon-2), transparent);
+      box-shadow: 0 0 24px rgba(0,224,164,.45), inset 0 0 20px rgba(94,231,255,.2);
+      display:grid; place-items:center; color:#00151b; font-weight:800;
+      transform: rotate(-6deg);
+    }
+    h1 { font-size: clamp(22px, 2.6vw, 32px); margin:0; letter-spacing:.2px; }
+    .subtitle { color: var(--muted); font-size: 14px; }
+
+    .actions {
+      margin-top: 12px;
+      display:flex; gap:12px; align-items:center; flex-wrap: wrap;
+    }
+    .search {
+      flex: 1 1 320px; display:flex; align-items:center; gap:10px;
+      background: rgba(6,18,26,.7);
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 12px; padding: 10px 12px;
+      box-shadow: inset 0 0 0 1px rgba(0,224,164,.0);
+      transition: box-shadow .2s ease;
+    }
+    .search:focus-within { box-shadow: inset 0 0 0 1px rgba(0,224,164,.35); }
+    .search input {
+      flex:1; background:transparent; border:0; outline:0; color:var(--text);
+      font-size:16px; padding: 6px 2px;
+    }
+    .toggle {
+      background: linear-gradient(180deg, #0a1f2d, #0a1a25);
+      border: 1px solid rgba(255,255,255,.08);
+      color: var(--text);
+      padding: 10px 14px; border-radius: 12px; cursor:pointer;
+      transition: transform .12s ease, box-shadow .12s ease;
+      box-shadow: var(--shadow);
+    }
+    .toggle:active { transform: translateY(1px) scale(.99); }
+    .hint { color: var(--muted); font-size: 12px; margin-left:auto; }
+
+    main {
+      flex: 1; padding: 24px 0 40px;
+    }
+    .grid {
+      display:grid; grid-template-columns: repeat(auto-fit, var(--grid)); gap: var(--gap);
+    }
+    .card {
+      position: relative; overflow: hidden; border-radius: var(--radius);
+      background: linear-gradient(180deg, var(--card), rgba(10,30,42,.85));
+      border: 1px solid rgba(255,255,255,.06);
+      box-shadow: var(--shadow);
+      transform: translateZ(0);
+      transition: transform .2s ease, border-color .2s ease, background .2s ease;
+      will-change: transform;
+    }
+    .card:hover { transform: translateY(-2px) scale(1.01); border-color: rgba(0,224,164,.25); background: var(--card-hover); }
+    .card::after {
+      content:""; position:absolute; inset: -30% -30% auto auto; height: 160px; aspect-ratio:1;
+      background: radial-gradient(closest-side, rgba(0,224,164,.15), rgba(0,224,164,0));
+      border-radius: 50%; filter: blur(18px); transform: translateY(-30%) rotate(25deg);
+      pointer-events:none;
+    }
+    .thumb {
+      position: relative; aspect-ratio: 16/9; overflow:hidden; background:#061722;
+      display:grid; place-items:center;
+    }
+    .thumb img {
+      width:100%; height:100%; object-fit: cover; filter: saturate(1.05) contrast(1.02);
+      transition: transform .4s ease;
+    }
+    .card:hover .thumb img { transform: scale(1.04); }
+    .body {
+      display:flex; align-items:center; gap:12px;
+      padding: 14px 14px 16px;
+    }
+    .info { flex:1; min-width:0; }
+    .name { font-weight: 700; font-size: 16px; letter-spacing:.2px; margin:0 0 2px; }
+    .url { font-size: 12px; color: var(--muted); overflow:hidden; text-overflow: ellipsis; white-space:nowrap; }
+    .open {
+      --c: var(--neon);
+      background: linear-gradient(180deg, rgba(0,224,164,.12), rgba(0,224,164,.06));
+      color: var(--text); border: 1px solid rgba(0,224,164,.35);
+      padding: 9px 12px; border-radius: 10px; text-decoration:none; font-weight:600; font-size:14px;
+      transition: transform .15s ease, background .15s ease, box-shadow .15s ease;
+      box-shadow: 0 6px 18px rgba(0,224,164,.15);
+      white-space: nowrap;
+    }
+    .open:hover { background: rgba(0,224,164,.18); box-shadow: 0 8px 26px rgba(0,224,164,.22); }
+    .fav {
+      background: transparent; border: 0; cursor: pointer; padding: 6px; border-radius: 8px;
+      transition: transform .12s ease, background .12s ease;
+    }
+    .fav:hover { background: rgba(255,255,255,.06); }
+    .fav:active { transform: scale(.95); }
+    .fav svg { width: 22px; height: 22px; display:block; }
+    .fav[data-active="true"] svg path { fill: gold; stroke: #b68b00; }
+    .fav[data-active="false"] svg path { fill: transparent; stroke: #ffe08a; }
+
+    footer {
+      padding: 18px 0 28px; color: var(--muted);
+    }
+    .foot {
+      width:min(1200px,92vw); margin:0 auto; font-size:12px; display:flex; gap:10px; align-items:center; flex-wrap: wrap;
+    }
+    .pulse {
+      display:inline-block; width:8px; height:8px; border-radius:50%; background: var(--neon); box-shadow: 0 0 12px var(--neon);
+      animation: pulse 1.8s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%,100% { transform: scale(1); opacity: .75; }
+      50% { transform: scale(1.35); opacity: 1; }
+    }
+
+    /* Compacte layout voor small screens */
+    @media (max-width: 560px) {
+      .actions { gap:8px; }
+      .hint { display:none; }
+      .open { padding: 8px 10px; font-size: 13px; }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="fx" aria-hidden="true"></canvas>
+  <div class="wrap">
+    <header>
+      <div class="inner">
+        <div class="title" role="banner" aria-label="Installatiehok van de Toekomst">
+          <div class="logo" aria-hidden="true">IH</div>
+          <div>
+            <h1>Installatiehok van de Toekomst</h1>
+            <div class="subtitle">Jouw snelle start naar alle tools — met een snufje neon</div>
+          </div>
+        </div>
+        <div class="actions" role="search">
+          <label class="search" aria-label="Zoek tools">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M21 21l-4.35-4.35m1.1-5.15a7 7 0 11-14 0 7 7 0 0114 0z" stroke="#a8c1cc" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+            <input id="q" type="search" placeholder="Zoeken op naam of URL…" autocomplete="off" />
+          </label>
+          <button id="toggleFavs" class="toggle" aria-pressed="false">Alle tools</button>
+          <div class="hint">Tip: druk / om te zoeken • ⭐ om te faven</div>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <div class="inner">
+        <section id="grid" class="grid" aria-live="polite" aria-busy="true"></section>
+      </div>
+    </main>
+
+    <footer>
+      <div class="foot">
+        <span class="pulse" aria-hidden="true"></span>
+        <span>Gemaakt met liefde voor slimme installaties. Werk ze! ⚙️</span>
+      </div>
+    </footer>
+  </div>
+
+  <script>
+    // ---------------------------
+    // 1) Config: tools.json laden
+    // ---------------------------
+    const defaultTools = [
+      {"name":"Teams", "url":"https://teams.microsoft.com", "image":"https://logos-world.net/wp-content/uploads/2021/02/Microsoft-Teams-Logo.png"},
+      {"name":"SharePoint", "url":"https://www.office.com/launch/sharepoint", "image":"https://seeklogo.com/images/S/sharepoint-logo-4C59687F21-seeklogo.com.png"},
+      {"name":"OneDrive", "url":"https://onedrive.live.com", "image":"https://seeklogo.com/images/M/microsoft-onedrive-logo-87E8C1D3A1-seeklogo.com.png"},
+      {"name":"Outlook", "url":"https://outlook.office.com", "image":"https://seeklogo.com/images/O/outlook-2019--2016--logo-7BE613FEC3-seeklogo.com.png"},
+      {"name":"Planner", "url":"https://tasks.office.com", "image":"https://seeklogo.com/images/M/microsoft-planner-logo-19EC788EEB-seeklogo.com.png"},
+      {"name":"Power BI", "url":"https://app.powerbi.com", "image":"https://seeklogo.com/images/P/power-bi-logo-76B25C605A-seeklogo.com.png"}
+    ];
+
+    async function loadTools() {
+      try {
+        const res = await fetch('tools.json', { cache: 'no-store' });
+        if (!res.ok) throw new Error('No tools.json');
+        const data = await res.json();
+        if (!Array.isArray(data)) throw new Error('tools.json moet een array zijn');
+        return data;
+      } catch (e) {
+        console.warn('tools.json niet gevonden of ongeldig. Gebruik defaultTools.', e);
+        return defaultTools;
+      }
+    }
+
+    // ---------------------------
+    // 2) Favorieten (localStorage)
+    // ---------------------------
+    const FAV_KEY = 'ihvt_favorites_v1';
+    function getFavs() {
+      try { return new Set(JSON.parse(localStorage.getItem(FAV_KEY) || '[]')); }
+      catch { return new Set(); }
+    }
+    function setFavs(set) {
+      localStorage.setItem(FAV_KEY, JSON.stringify([...set]));
+    }
+
+    // ---------------------------
+    // 3) Renderen van kaarten
+    // ---------------------------
+    const grid = document.getElementById('grid');
+    const q = document.getElementById('q');
+    const toggleFavsBtn = document.getElementById('toggleFavs');
+
+    let tools = [];
+    let showOnlyFavs = false;
+    let favs = getFavs();
+
+    function normalize(str){ return (str||'').toLowerCase().normalize('NFKD'); }
+
+    function createCard(tool) {
+      const card = document.createElement('article');
+      card.className = 'card';
+      card.tabIndex = 0;
+      card.setAttribute('role', 'group');
+      card.setAttribute('aria-label', tool.name);
+
+      // Tilt-gevoel
+      card.addEventListener('mousemove', (e) => {
+        const r = card.getBoundingClientRect();
+        const x = (e.clientX - r.left) / r.width - 0.5;
+        const y = (e.clientY - r.top) / r.height - 0.5;
+        card.style.transform = `translateY(-2px) rotateX(${y * -2}deg) rotateY(${x * 2}deg) scale(1.01)`;
+      });
+      card.addEventListener('mouseleave', () => { card.style.transform = ''; });
+
+      // Thumb
+      const thumb = document.createElement('div');
+      thumb.className = 'thumb';
+      const img = document.createElement('img');
+      img.alt = tool.name;
+      img.loading = 'lazy';
+      img.decoding = 'async';
+      img.src = tool.image || '';
+      img.onerror = () => { img.src = 'data:image/svg+xml;utf8,' + encodeURIComponent(`
+        <svg xmlns="http://www.w3.org/2000/svg" width="640" height="360">
+          <rect width="100%" height="100%" fill="#0b1f2e"/>
+          <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#5ee7ff" font-family="sans-serif" font-size="22">Geen afbeelding</text>
+        </svg>
+      `); };
+      thumb.appendChild(img);
+
+      // Body
+      const body = document.createElement('div');
+      body.className = 'body';
+
+      const info = document.createElement('div');
+      info.className = 'info';
+      const name = document.createElement('div');
+      name.className = 'name';
+      name.textContent = tool.name;
+
+      const url = document.createElement('div');
+      url.className = 'url';
+      url.textContent = tool.url;
+
+      info.append(name, url);
+
+      const fav = document.createElement('button');
+      fav.className = 'fav';
+      fav.setAttribute('aria-label', `Zet ${tool.name} als favoriet`);
+      const isFav = favs.has(tool.url);
+      fav.dataset.active = isFav ? 'true' : 'false';
+      fav.innerHTML = `
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 17.27L18.18 21l-1.64-7.03L22 9.25l-7.19-.61L12 2 9.19 8.64 2 9.25l5.46 4.72L5.82 21 12 17.27Z" stroke-width="1.6" />
+        </svg>
+      `;
+      fav.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const active = fav.dataset.active === 'true';
+        if (active) favs.delete(tool.url); else favs.add(tool.url);
+        setFavs(favs);
+        fav.dataset.active = active ? 'false' : 'true';
+        // Re-render om favorieten bovenaan te houden
+        render();
+      });
+
+      const open = document.createElement('a');
+      open.className = 'open';
+      open.href = tool.url;
+      open.target = '_blank';
+      open.rel = 'noopener noreferrer';
+      open.textContent = 'Openen';
+
+      body.append(info, fav, open);
+      card.append(thumb, body);
+
+      // Maak hele kaart klikbaar
+      card.addEventListener('click', (e) => {
+        if (e.target.closest('.fav') || e.target.closest('.open')) return;
+        window.open(tool.url, '_blank', 'noopener');
+      });
+
+      // Toetsenbord
+      card.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); window.open(tool.url, '_blank', 'noopener'); }
+      });
+
+      return card;
+    }
+
+    function render() {
+      const term = normalize(q.value);
+      let filtered = tools.filter(t => {
+        if (showOnlyFavs && !favs.has(t.url)) return false;
+        if (!term) return true;
+        return normalize(t.name).includes(term) || normalize(t.url).includes(term);
+      });
+
+      // Sorteer: favorieten eerst, daarna alfabetisch
+      filtered.sort((a, b) => {
+        const af = favs.has(a.url), bf = favs.has(b.url);
+        if (af !== bf) return af ? -1 : 1;
+        return a.name.localeCompare(b.name, 'nl');
+      });
+
+      grid.setAttribute('aria-busy', 'true');
+      grid.innerHTML = '';
+      filtered.forEach(t => grid.appendChild(createCard(t)));
+      grid.setAttribute('aria-busy', 'false');
+
+      toggleFavsBtn.textContent = showOnlyFavs ? 'Favorieten' : 'Alle tools';
+      toggleFavsBtn.setAttribute('aria-pressed', String(showOnlyFavs));
+    }
+
+    // Zoek-shortcut
+    window.addEventListener('keydown', (e) => {
+      if (e.key === '/' && document.activeElement !== q) {
+        e.preventDefault(); q.focus(); q.select();
+      }
+    });
+
+    toggleFavsBtn.addEventListener('click', () => {
+      showOnlyFavs = !showOnlyFavs;
+      render();
+    });
+    q.addEventListener('input', render);
+
+    // Init
+    (async () => {
+      tools = await loadTools();
+      render();
+    })();
+
+    // ---------------------------
+    // 4) Interactieve deeltjes
+    // ---------------------------
+    (function particles(){
+      const c = document.getElementById('fx');
+      const ctx = c.getContext('2d');
+      let w, h, dpr, points, mouse = {x:0,y:0,active:false};
+      const N = 80; // aantal punten
+      const MAX_D = 140; // verbindingsafstand
+      const SPEED = 0.2;
+
+      function resize(){
+        dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+        w = c.width = Math.floor(innerWidth * dpr);
+        h = c.height = Math.floor(innerHeight * dpr);
+        c.style.width = innerWidth + 'px';
+        c.style.height = innerHeight + 'px';
+        spawn();
+      }
+      function spawn(){
+        points = Array.from({length: N}, () => ({
+          x: Math.random()*w, y: Math.random()*h,
+          vx: (Math.random()-.5)*SPEED, vy:(Math.random()-.5)*SPEED,
+        }));
+      }
+      function step(){
+        ctx.clearRect(0,0,w,h);
+
+        // Achtergrondglow
+        const g = ctx.createRadialGradient(mouse.x, mouse.y, 0, mouse.x, mouse.y, 220*dpr);
+        g.addColorStop(0, 'rgba(0,224,164,.14)');
+        g.addColorStop(1, 'rgba(0,224,164,0)');
+        ctx.fillStyle = g; ctx.fillRect(0,0,w,h);
+
+        // Update punten
+        for (const p of points){
+          p.x += p.vx; p.y += p.vy;
+          if (p.x < 0 || p.x > w) p.vx *= -1;
+          if (p.y < 0 || p.y > h) p.vy *= -1;
+        }
+
+        // Verbindingen
+        ctx.lineWidth = 1;
+        for (let i=0;i<points.length;i++){
+          const a = points[i];
+          for (let j=i+1;j<points.length;j++){
+            const b = points[j];
+            const dx = a.x-b.x, dy=a.y-b.y;
+            const dist = Math.hypot(dx, dy);
+            if (dist < MAX_D*dpr){
+              const alpha = 1 - (dist/(MAX_D*dpr));
+              ctx.strokeStyle = `rgba(94,231,255,${alpha*.35})`;
+              ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+            }
+          }
+        }
+
+        // Puntjes
+        for (const p of points){
+          ctx.fillStyle = 'rgba(94,231,255,.8)';
+          ctx.beginPath(); ctx.arc(p.x, p.y, 1.6*dpr, 0, Math.PI*2); ctx.fill();
+          ctx.fillStyle = 'rgba(0,224,164,.9)';
+          ctx.beginPath(); ctx.arc(p.x, p.y, .8*dpr, 0, Math.PI*2); ctx.fill();
+        }
+
+        // Mouse attractie
+        if (mouse.active){
+          for (const p of points){
+            const dx = mouse.x - p.x, dy = mouse.y - p.y;
+            const d = Math.hypot(dx, dy);
+            if (d < 220*dpr){
+              p.vx += dx/d * 0.002; p.vy += dy/d * 0.002;
+            }
+          }
+        }
+        requestAnimationFrame(step);
+      }
+
+      window.addEventListener('resize', resize);
+      window.addEventListener('mousemove', (e) => {
+        mouse.x = (e.clientX * (window.devicePixelRatio||1));
+        mouse.y = (e.clientY * (window.devicePixelRatio||1));
+        mouse.active = true;
+      }, { passive: true });
+      window.addEventListener('mouseleave', ()=> mouse.active=false);
+
+      resize(); step();
+    })();
+  </script>
+</body>
+</html>
