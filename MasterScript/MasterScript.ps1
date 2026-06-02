@@ -2,7 +2,7 @@
 ===============================================================================
  UNO - MASTER TOOLKIT
  Auteur:  Nick Hoogkamer (Operations)
- Versie:  1.2.0
+ Versie:  1.2.3
  Doel:    Centraal menu voor laptop-oplevering en -beheer.
 
  Bronnen / credits:
