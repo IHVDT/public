@@ -27,6 +27,11 @@
 ===============================================================================
 #>
 
+# --- Parameters --------------------------------------------------------------
+param(
+    [switch]$SkipUpdate
+)
+
 # --- Vereisten ---------------------------------------------------------------
 #Requires -Version 5.1
 
@@ -192,7 +197,7 @@ function Invoke-Rollback {
             Write-OK "Teruggedraaid naar vorige versie."
             Write-Warn "Script wordt herstart..."
             Start-Sleep -Seconds 2
-            & $PSCommandPath
+            & $PSCommandPath -SkipUpdate
             exit
         }
     }
@@ -650,7 +655,12 @@ function Show-EnrollmentStatus {
 # =============================================================================
 # AUTO-UPDATE BIJ OPSTARTEN
 # =============================================================================
-$updateResult = Invoke-AutoUpdate
+if (-not $SkipUpdate) {
+    $updateResult = Invoke-AutoUpdate
+} else {
+    $updateResult = @{ Updated = $false; Message = $null }
+    Write-Info "Update-check overgeslagen (zojuist bijgewerkt)."
+}
 
 if ($updateResult.Updated) {
     Show-Header
@@ -668,7 +678,7 @@ if ($updateResult.Updated) {
     Write-Host ""
     Write-Host "   Script wordt herstart met de nieuwe versie..." -ForegroundColor Yellow
     Start-Sleep -Seconds 3
-    & $PSCommandPath
+    & $PSCommandPath -SkipUpdate
     exit
 }
 elseif ($updateResult.Message) {
