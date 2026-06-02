@@ -2,14 +2,18 @@
 ===============================================================================
  UNO - MASTER TOOLKIT
  Auteur:  Nick Hoogkamer (Operations)
- Versie:  1.0
+ Versie:  1.2.0
  Doel:    Centraal menu voor laptop-oplevering en -beheer.
 
  Bronnen / credits:
    - Master_Enroll        : Brandon van Dijk
    - DriverUpdate         : (third-party Windows Update driver search)
    - BitlockerCheck       : Nick Hoogkamer
+   - Auto-update          : GitHub (IHVDT/public)
  Samengevoegd tot Ã©Ã©n menugestuurd masterscript.
+
+ LET OP: Dit script schrijft NIETS naar de klant-laptop.
+         Alle logs en tijdelijke bestanden blijven op de USB-stick.
 ===============================================================================
 
  Opties:
@@ -18,12 +22,28 @@
    3) Laptopgegevens ophalen en tonen
    4) BitlockerCheck (self-healing)
    5) Enrollment-/Intune-status (dsregcmd)
+   9) Rollback (vorige versie terugzetten)
    0) Afsluiten
 ===============================================================================
 #>
 
 # --- Vereisten ---------------------------------------------------------------
 #Requires -Version 5.1
+
+# --- Versie & Update configuratie --------------------------------------------
+$ScriptVersion  = "1.2.0"
+$GitHubUser     = "IHVDT"
+$GitHubRepo     = "public"
+$GitHubBranch   = "main"
+$ScriptFolder   = "MasterScript"
+$BaseURL        = "https://raw.githubusercontent.com/$GitHubUser/$GitHubRepo/$GitHubBranch/$ScriptFolder"
+
+# --- Paden (alles op de USB, NIETS op de klant-laptop) -----------------------
+$ScriptRoot     = Split-Path -Parent $PSCommandPath
+$LogDir         = Join-Path $ScriptRoot "Logs"
+$TempDir        = Join-Path $ScriptRoot "Temp"
+if (-not (Test-Path $LogDir))  { New-Item -Path $LogDir  -ItemType Directory -Force | Out-Null }
+if (-not (Test-Path $TempDir)) { New-Item -Path $TempDir -ItemType Directory -Force | Out-Null }
 
 # Zorg dat we als Administrator draaien; zo niet, herstart verhoogd.
 function Test-Admin {
@@ -44,7 +64,7 @@ if (-not (Test-Admin)) {
     return
 }
 
-$Host.UI.RawUI.WindowTitle = "UNO - Master Toolkit"
+$Host.UI.RawUI.WindowTitle = "UNO - Master Toolkit v$ScriptVersion"
 
 # --- Helper functies (uniforme, rustige output) ------------------------------
 function Write-Section($t){ Write-Host "`n==== $t ====" -ForegroundColor Cyan }
@@ -59,6 +79,129 @@ function Pause-Menu {
     [void][System.Console]::ReadKey($true)
 }
 
+# =============================================================================
+# AUTO-UPDATE FUNCTIE
+# =============================================================================
+function Invoke-AutoUpdate {
+    <#
+    .SYNOPSIS
+        Controleert GitHub op een nieuwere versie en werkt het script bij.
+        Draait stil op de achtergrond - bij geen internet gewoon door.
+    #>
+
+    # --- Stap 1: Online versie ophalen ---------------------------------------
+    $versionURL = "$BaseURL/version.txt"
+    try {
+        $response = Invoke-WebRequest -Uri $versionURL -UseBasicParsing `
+                        -TimeoutSec 5 -ErrorAction Stop
+        $remoteVersion = $response.Content.Trim()
+    }
+    catch {
+        # Geen internet of GitHub niet bereikbaar - stil doorgaan
+        return @{ Updated = $false; Message = $null }
+    }
+
+    # --- Stap 2: Versies vergelijken -----------------------------------------
+    try {
+        $local  = [version]$ScriptVersion
+        $remote = [version]$remoteVersion
+    }
+    catch {
+        return @{ Updated = $false; Message = $null }
+    }
+
+    if ($remote -le $local) {
+        # Alles up-to-date
+        return @{ Updated = $false; Message = $null }
+    }
+
+    # --- Stap 3: Nieuwe versie beschikbaar! ----------------------------------
+    Write-Host ""
+    Write-Host "   Nieuwe versie beschikbaar: v$ScriptVersion -> v$remoteVersion" `
+        -ForegroundColor Yellow
+    Write-Host "   Bijwerken..." -ForegroundColor DarkGray
+
+    $scriptURL  = "$BaseURL/MasterScript.ps1"
+    $scriptPath = $PSCommandPath   # Pad van het huidige draaiende script
+    $backupPath = "$scriptPath.bak"
+
+    try {
+        # Download nieuw script naar tijdelijk bestand
+        $tempFile = "$scriptPath.tmp"
+        Invoke-WebRequest -Uri $scriptURL -OutFile $tempFile `
+            -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
+
+        # Controleer of download geldig is (niet leeg / niet een foutpagina)
+        $content = Get-Content $tempFile -Raw -ErrorAction Stop
+        if ($content.Length -lt 500 -or $content -notmatch 'UNO') {
+            Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+            return @{ Updated = $false; Message = "Download lijkt ongeldig, update overgeslagen." }
+        }
+
+        # Backup maken van huidige versie
+        if (Test-Path $backupPath) { Remove-Item $backupPath -Force }
+        Copy-Item -Path $scriptPath -Destination $backupPath -Force
+
+        # Overschrijf met nieuwe versie
+        Move-Item -Path $tempFile -Destination $scriptPath -Force
+
+        # --- Stap 4: Changelog ophalen (optioneel) ---------------------------
+        $changelogMsg = $null
+        try {
+            $clURL = "$BaseURL/changelog.txt"
+            $cl = (Invoke-WebRequest -Uri $clURL -UseBasicParsing `
+                       -TimeoutSec 5 -ErrorAction Stop).Content
+            # Pak alleen de regels van de nieuwe versie
+            $section = ($cl -split "(?m)^##\s") |
+                       Where-Object { $_ -match "^$remoteVersion" } |
+                       Select-Object -First 1
+            if ($section) { $changelogMsg = $section.Trim() }
+        }
+        catch { }
+
+        return @{
+            Updated      = $true
+            NewVersion   = $remoteVersion
+            Changelog    = $changelogMsg
+            BackupPath   = $backupPath
+        }
+    }
+    catch {
+        # Download mislukt - opruimen en doorgaan met huidige versie
+        Remove-Item "$scriptPath.tmp" -Force -ErrorAction SilentlyContinue
+        return @{ Updated = $false; Message = "Update mislukt: $($_.Exception.Message)" }
+    }
+}
+
+# =============================================================================
+# ROLLBACK FUNCTIE
+# =============================================================================
+function Invoke-Rollback {
+    Show-Header
+    Write-Section "Rollback naar vorige versie"
+
+    $backupPath = "$PSCommandPath.bak"
+    if (Test-Path $backupPath) {
+        Write-Info "Backup gevonden: $backupPath"
+        $confirm = Read-Host "Weet je zeker dat je wilt terugdraaien? (J/n)"
+        if ($confirm -match '^[Nn]') {
+            Write-Info "Rollback geannuleerd."
+        }
+        else {
+            Copy-Item -Path $backupPath -Destination $PSCommandPath -Force
+            Write-OK "Teruggedraaid naar vorige versie."
+            Write-Warn "Script wordt herstart..."
+            Start-Sleep -Seconds 2
+            & $PSCommandPath
+            exit
+        }
+    }
+    else {
+        Write-Err "Geen backup gevonden om naar terug te draaien."
+    }
+    Pause-Menu
+}
+
 # --- Header / banner ---------------------------------------------------------
 function Show-Header {
     Clear-Host
@@ -66,7 +209,7 @@ function Show-Header {
     Write-Host $line -ForegroundColor DarkCyan
     Write-Host "   _   _ _   _  ___      __  __         _           " -ForegroundColor Cyan
     Write-Host "  | | | | \ | |/ _ \    |  \/  |__ _ __| |_ ___ _ _ " -ForegroundColor Cyan
-    Write-Host "  | |_| |  \| | (_) |   | |\/| / _` (_-<  _/ -_) '_|" -ForegroundColor Cyan
+    Write-Host "  | |_| |  \| | (_) |   | |\/| / _`` (_-<  _/ -_) '_|" -ForegroundColor Cyan
     Write-Host "   \___/|_|\__|\___/    |_|  |_\__,_/__/\__\___|_|  " -ForegroundColor Cyan
     Write-Host ""
     Write-Host "                  M A S T E R   T O O L K I T" -ForegroundColor White
@@ -76,6 +219,7 @@ function Show-Header {
     $now = Get-Date -Format "dddd dd-MM-yyyy HH:mm"
     Write-Host ("  Toestel: {0,-20} Gebruiker: {1}" -f $cn, $usr) -ForegroundColor DarkGray
     Write-Host ("  Datum:   {0}" -f $now) -ForegroundColor DarkGray
+    Write-Host ("  Versie:  v{0}" -f $ScriptVersion) -ForegroundColor DarkGray
     Write-Host $line -ForegroundColor DarkCyan
 }
 
@@ -91,6 +235,7 @@ function Show-Menu {
     Write-Host "     [4] " -ForegroundColor Green   -NoNewline; Write-Host "BitlockerCheck    " -NoNewline -ForegroundColor White; Write-Host "(controle & self-healing)" -ForegroundColor DarkGray
     Write-Host "     [5] " -ForegroundColor Green   -NoNewline; Write-Host "Enrollment-status " -NoNewline -ForegroundColor White; Write-Host "(Azure AD / Intune)" -ForegroundColor DarkGray
     Write-Host ""
+    Write-Host "     [9] " -ForegroundColor DarkYellow -NoNewline; Write-Host "Rollback          " -NoNewline -ForegroundColor White; Write-Host "(vorige versie terugzetten)" -ForegroundColor DarkGray
     Write-Host "     [0] " -ForegroundColor Red     -NoNewline; Write-Host "Afsluiten" -ForegroundColor White
     Write-Host ""
     Write-Host "   ----------------------------------------------------------" -ForegroundColor DarkCyan
@@ -106,8 +251,8 @@ function Invoke-Enrollment {
     Write-Section "Enrollment - Autopilot / Intune"
     Write-Warn "Hiervoor is een actieve internetverbinding vereist."
     Write-Host ""
-    $go = Read-Host "Doorgaan met enrollment? (J/N)"
-    if ($go -notmatch '^[JjYy]') { Write-Info "Geannuleerd."; Pause-Menu; return }
+    $go = Read-Host "Doorgaan met enrollment? (J/n)"
+    if ($go -match '^[Nn]') { Write-Info "Geannuleerd."; Pause-Menu; return }
 
     try {
         # Forceer dat (non-terminating) fouten alsnog in de catch belanden.
@@ -134,11 +279,12 @@ function Invoke-Enrollment {
         # 3) Autopilot-gegevens uploaden naar Intune.
         Write-Info "Autopilot-gegevens uploaden naar Microsoft Intune..."
         Write-Warn "Er verschijnt een Microsoft-aanmeldvenster. Log in met een account dat toestellen mag inschrijven."
-        $temp = "C:\Temp"
-        if (-not (Test-Path $temp)) { New-Item -Path $temp -ItemType Directory | Out-Null }
-        Save-Script -Name Get-WindowsAutoPilotInfo -Path $temp -Force -ErrorAction Stop
 
-        $apScript = Join-Path $temp "Get-WindowsAutoPilotInfo.ps1"
+        # Temp-map op de USB-stick, NIET op de klant-laptop
+        if (-not (Test-Path $TempDir)) { New-Item -Path $TempDir -ItemType Directory | Out-Null }
+        Save-Script -Name Get-WindowsAutoPilotInfo -Path $TempDir -Force -ErrorAction Stop
+
+        $apScript = Join-Path $TempDir "Get-WindowsAutoPilotInfo.ps1"
         if (-not (Test-Path $apScript)) {
             Write-Err "Autopilot-script kon niet worden gedownload. Enrollment afgebroken."
             Pause-Menu; return
@@ -161,13 +307,13 @@ function Invoke-Enrollment {
         if ($apOk) {
             Write-OK "Autopilot-upload voltooid - toestel is aangemeld bij Intune."
             Write-Host ""
-            $rb = Read-Host "Nu herstarten om de enrollment af te ronden? (J/N)"
-            if ($rb -match '^[JjYy]') {
+            $rb = Read-Host "Nu herstarten om de enrollment af te ronden? (J/n)"
+            if ($rb -match '^[Nn]') {
+                Write-Warn "Niet herstart. Herstart het toestel later handmatig om de enrollment af te ronden."
+            } else {
                 Write-Info "Herstarten over 3 seconden..."
                 Start-Sleep -Seconds 3
                 Restart-Computer -Force
-            } else {
-                Write-Warn "Niet herstart. Herstart het toestel later handmatig om de enrollment af te ronden."
             }
         } else {
             Write-Err "Enrollment is NIET voltooid. Kies optie 1 opnieuw en log dit keer wel in."
@@ -177,7 +323,8 @@ function Invoke-Enrollment {
         Write-Err "Er ging iets mis tijdens enrollment: $($_.Exception.Message)"
     }
     finally {
-        if (Test-Path "C:\Temp") { Remove-Item "C:\Temp" -Recurse -Force -ErrorAction SilentlyContinue }
+        # Opruimen op de USB-stick
+        if (Test-Path $TempDir) { Remove-Item $TempDir -Recurse -Force -ErrorAction SilentlyContinue }
     }
     Pause-Menu
 }
@@ -314,13 +461,11 @@ function Show-SystemInfo {
         $online = Test-Connection -ComputerName 8.8.8.8 -Count 1 -Quiet -ErrorAction SilentlyContinue
         Row "Internet"       ($(if ($online) { "Verbonden" } else { "Geen verbinding" }))
 
-        # Optioneel exporteren
+        # Exporteren naar USB-stick
         Write-Host ""
-        $exp = Read-Host "Gegevens exporteren naar bestand? (J/N)"
-        if ($exp -match '^[JjYy]') {
-            $outDir = "C:\Logs"
-            if (-not (Test-Path $outDir)) { New-Item -Path $outDir -ItemType Directory | Out-Null }
-            $outFile = Join-Path $outDir ("SystemInfo_{0}_{1}.txt" -f $env:COMPUTERNAME, (Get-Date -Format "yyyyMMdd_HHmm"))
+        $exp = Read-Host "Gegevens exporteren naar USB-stick? (J/n)"
+        if ($exp -notmatch '^[Nn]') {
+            $outFile = Join-Path $LogDir ("SystemInfo_{0}_{1}.txt" -f $env:COMPUTERNAME, (Get-Date -Format "yyyyMMdd_HHmm"))
             $report = @"
 UNO - Laptopgegevens
 Gegenereerd: $(Get-Date -Format "yyyy-MM-dd HH:mm")
@@ -337,7 +482,7 @@ OS             : $($os.Caption) $($os.Version) (build $($os.BuildNumber))
 Laatst gestart : $($os.LastBootUpTime)
 "@
             $report | Out-File -FilePath $outFile -Encoding UTF8
-            Write-OK "Opgeslagen: $outFile"
+            Write-OK "Opgeslagen op USB: $outFile"
         }
     }
     catch {
@@ -352,8 +497,9 @@ Laatst gestart : $($os.LastBootUpTime)
 function Invoke-BitlockerCheck {
     Show-Header
     $DriveLetter = "C:"
-    $LogFile     = "C:\Logs\BitLocker-AutoFix.log"
-    if (-not (Test-Path "C:\Logs")) { New-Item -Path "C:\Logs" -ItemType Directory | Out-Null }
+
+    # Logbestand op de USB-stick
+    $LogFile = Join-Path $LogDir "BitLocker-AutoFix.log"
 
     function Log($t){ ("{0} {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $t) | Out-File -FilePath $LogFile -Append }
 
@@ -442,7 +588,7 @@ function Invoke-BitlockerCheck {
     } else {
         Write-Warn "BitLocker heeft een of meer waarschuwingen - zie details hierboven."
     }
-    Write-Host "`nLogbestand: $LogFile" -ForegroundColor Cyan
+    Write-Host "`nLogbestand (USB): $LogFile" -ForegroundColor Cyan
     Log "Klaar: pct=$($end.Percent) prot=$($end.Protection) conv='$($end.Conversion)' TPM=$($end.HasTPM)"
     Pause-Menu
 }
@@ -489,8 +635,8 @@ function Show-EnrollmentStatus {
         }
 
         Write-Host ""
-        $full = Read-Host "Volledige dsregcmd-output tonen? (J/N)"
-        if ($full -match '^[JjYy]') {
+        $full = Read-Host "Volledige dsregcmd-output tonen? (J/n)"
+        if ($full -notmatch '^[Nn]') {
             Write-Host ""
             $raw | Out-Host
         }
@@ -499,6 +645,35 @@ function Show-EnrollmentStatus {
         Write-Err "Kon enrollment-status niet ophalen: $($_.Exception.Message)"
     }
     Pause-Menu
+}
+
+# =============================================================================
+# AUTO-UPDATE BIJ OPSTARTEN
+# =============================================================================
+$updateResult = Invoke-AutoUpdate
+
+if ($updateResult.Updated) {
+    Show-Header
+    Write-Host ""
+    Write-OK "Bijgewerkt naar v$($updateResult.NewVersion)!"
+
+    if ($updateResult.Changelog) {
+        Write-Host ""
+        Write-Host "   Wat is nieuw:" -ForegroundColor Cyan
+        $updateResult.Changelog -split "`n" | ForEach-Object {
+            Write-Host "   $_" -ForegroundColor White
+        }
+    }
+
+    Write-Host ""
+    Write-Host "   Script wordt herstart met de nieuwe versie..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 3
+    & $PSCommandPath
+    exit
+}
+elseif ($updateResult.Message) {
+    Write-Warn $updateResult.Message
+    Start-Sleep -Seconds 2
 }
 
 # =============================================================================
@@ -513,6 +688,7 @@ do {
         '3' { Show-SystemInfo }
         '4' { Invoke-BitlockerCheck }
         '5' { Show-EnrollmentStatus }
+        '9' { Invoke-Rollback }
         '0' {
             Show-Header
             Write-Host ""
@@ -521,7 +697,7 @@ do {
             Start-Sleep -Milliseconds 800
         }
         default {
-            Write-Warn "Ongeldige keuze: '$choice'. Kies 0 t/m 5."
+            Write-Warn "Ongeldige keuze: '$choice'. Kies 0-5 of 9."
             Start-Sleep -Seconds 1
         }
     }
