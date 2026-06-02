@@ -36,7 +36,7 @@ param(
 #Requires -Version 5.1
 
 # --- Versie & Update configuratie --------------------------------------------
-$ScriptVersion  = "1.2.0"
+$ScriptVersion  = "1.2.3"
 $GitHubUser     = "IHVDT"
 $GitHubRepo     = "public"
 $GitHubBranch   = "main"
