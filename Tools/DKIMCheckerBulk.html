@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+<meta charset="UTF-8">
+<title>DKIM Bulk Checker</title>
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+        background: #f4f6f8;
+    }
+    textarea {
+        width: 100%;
+        height: 120px;
+        margin-bottom: 10px;
+    }
+    button {
+        padding: 10px 20px;
+        background: #0078d4;
+        color: white;
+        border: none;
+        cursor: pointer;
+    }
+    table {
+        margin-top: 20px;
+        width: 100%;
+        border-collapse: collapse;
+    }
+    th, td {
+        padding: 10px;
+        border: 1px solid #ddd;
+        text-align: left;
+    }
+    th {
+        background: #0078d4;
+        color: white;
+    }
+    .ok { color: green; font-weight: bold; }
+    .fail { color: red; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<h2>DKIM Bulk Checker</h2>
+
+<label>Domeinen (1 per regel)</label>
+<textarea id="domains">example.com</textarea>
+
+<label>Selectors (1 per regel)</label>
+<textarea id="selectors">selector1
+selector2
+google</textarea>
+
+<button onclick="checkDKIM()">Check DKIM</button>
+
+<table id="results">
+    <thead>
+        <tr>
+            <th>Domein</th>
+            <th>Selector</th>
+            <th>Status</th>
+            <th>Record</th>
+        </tr>
+    </thead>
+    <tbody></tbody>
+</table>
+
+<script>
+async function fetchTXT(name) {
+    const url = `https://dns.google/resolve?name=${name}&type=16`;
+    const res = await fetch(url);
+    const data = await res.json();
+    return data;
+}
+
+async function checkDKIM() {
+    const domains = document.getElementById("domains").value.split("\n").map(d => d.trim()).filter(d => d);
+    const selectors = document.getElementById("selectors").value.split("\n").map(s => s.trim()).filter(s => s);
+
+    const tbody = document.querySelector("#results tbody");
+    tbody.innerHTML = "";
+
+    for (const domain of domains) {
+        for (const selector of selectors) {
+            const hostname = `${selector}._domainkey.${domain}`;
+            
+            let row = document.createElement("tr");
+            row.innerHTML = `<td>${domain}</td><td>${selector}</td><td>...</td><td></td>`;
+            tbody.appendChild(row);
+
+            try {
+                const data = await fetchTXT(hostname);
+
+                if (data.Answer) {
+                    const txtRecords = data.Answer.map(r => r.data).join("<br>");
+                    
+                    row.cells[2].innerHTML = `<span class="ok">✔ Found</span>`;
+                    row.cells[3].innerHTML = txtRecords;
+                } else {
+                    row.cells[2].innerHTML = `<span class="fail">✖ Not found</span>`;
+                    row.cells[3].textContent = "-";
+                }
+
+            } catch (err) {
+                row.cells[2].innerHTML = `<span class="fail">Error</span>`;
+                row.cells[3].textContent = err.message;
+            }
+        }
+    }
+}
+</script>
+
+</body>
+</html>
